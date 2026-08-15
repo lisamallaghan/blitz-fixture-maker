@@ -86,13 +86,13 @@ async function renderPosterCanvas(form: Form, matches: Match[], teams: Record<st
     const crest = new Image(); crest.src = form.logo; await crest.decode(); ctx.drawImage(crest, 43, 28, 108, 126); ctx.drawImage(crest, 969, 28, 108, 126);
   }
   ctx.fillStyle = "#050505"; ctx.font = '900 58px "Arial Black", "Arial Narrow", Arial'; ctx.fillText((form.host || "HOST CLUB").toUpperCase(), 560, 68);
-  ctx.fillStyle = form.primary; ctx.font = '900 52px "Arial Black", "Arial Narrow", Arial'; ctx.fillText("GIRLS BLITZ", 560, 119);
+  ctx.fillStyle = form.primary; ctx.font = '900 52px "Arial Black", "Arial Narrow", Arial'; ctx.fillText("GO GAMES BLITZ", 560, 119);
   ctx.fillStyle = form.accent; ctx.beginPath(); ctx.moveTo(290, 126); ctx.lineTo(830, 126); ctx.lineTo(814, 143); ctx.lineTo(830, 160); ctx.lineTo(290, 160); ctx.lineTo(306, 143); ctx.closePath(); ctx.fill();
   const date = form.date ? new Date(`${form.date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }).toUpperCase() : "EVENT DATE";
   ctx.fillStyle = "#fff"; ctx.font = '900 20px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(date, 560, 151); ctx.fillStyle = "#111"; ctx.font = '900 16px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(`HOSTED BY ${(form.host || "HOST CLUB").toUpperCase()}`, 560, 179);
-  rounded(10, 184, 1100, 44, 7, form.primary); ctx.fillStyle = "#fff"; ctx.font = '900 25px "Arial Black", "Arial Narrow", Arial'; ctx.fillText(`${form.age || "AGE GROUP"} BLITZ`, 560, 215);
+  rounded(10, 184, 1100, 44, 7, form.primary); ctx.fillStyle = "#fff"; ctx.font = '900 25px "Arial Black", "Arial Narrow", Arial'; ctx.fillText(`${form.age || "AGE GROUP"} FIXTURES`, 560, 215);
   rounded(10, 232, 1100, 43, 7, "#fff", "#9bae9f");
-  const facts = [{ icon: "◷", text: `${form.start} – ${end}` }, { icon: "◉", text: `${gameLength} MIN GAMES` }, { icon: "⏱", text: `${form.gap} MIN BREAK BETWEEN ROUNDS` }, { icon: "▦", text: `PITCHES P1–P${form.pitches}` }, { icon: "✓", text: `${form.games} GAMES PER TEAM` }];
+  const facts = [{ icon: "◷", text: `${form.start} – ${end}` }, { icon: "◉", text: `${gameLength} MIN GAMES` }, { icon: "⏱", text: `${form.gap} MINS BETWEEN ROUNDS` }, { icon: "▦", text: `PITCHES P1–P${form.pitches}` }, { icon: "✓", text: `${form.games} GAMES PER TEAM` }];
   facts.forEach((fact, index) => { const cell = 1100 / facts.length; if (index) { ctx.strokeStyle = "#b3c0b5"; ctx.beginPath(); ctx.moveTo(10 + index * cell, 238); ctx.lineTo(10 + index * cell, 269); ctx.stroke(); } const centre = 10 + index * cell + cell / 2; ctx.fillStyle = form.primary; ctx.font = '900 17px "Trebuchet MS", Arial'; ctx.fillText(fact.icon, centre - 66, 259); ctx.fillStyle = "#111"; ctx.font = '800 11px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(fact.text, centre + 10, 258); });
   const columns = rounds <= 4 ? 2 : 3; const rows = Math.max(1, Math.ceil(rounds / columns)); const gap = 9; const gridTop = 283; const gridHeight = 306; const boxWidth = (1100 - gap * (columns - 1)) / columns; const boxHeight = (gridHeight - gap * (rows - 1)) / rows;
   Array.from({ length: rounds }, (_, i) => i + 1).forEach((round, index) => {
