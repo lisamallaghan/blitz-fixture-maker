@@ -19,25 +19,46 @@ const initial: Form = {
   rules: "Maximum 9-a-side\nGames played straight through\nPlease respect referees at all times", info: "", primary: "#064b1f", accent: "#c9151e", logo: "",
 };
 
-function buildSchedule(teams: Team[], target: number, pitches: number) {
+function chooseBalancedPairs(teams: Team[], target: number, allowSameClub: boolean) {
   const counts = Object.fromEntries(teams.map(team => [team.id, 0]));
-  const pool = teams.flatMap((a, index) => teams.slice(index + 1).filter(b => a.group === b.group).map(b => ({ a, b, used: false })));
-  const chosen: typeof pool = [];
-  while (Object.values(counts).some(value => value < target)) {
-    const possible = pool.filter(pair => !pair.used && counts[pair.a.id] < target && counts[pair.b.id] < target);
-    if (!possible.length) break;
-    possible.sort((x, y) => {
-      const score = (pair: typeof x) => (pair.a.club.toLowerCase() === pair.b.club.toLowerCase() ? 100 : 0) + counts[pair.a.id] + counts[pair.b.id];
-      return score(x) - score(y);
-    });
-    const pair = possible[0]; pair.used = true; chosen.push(pair); counts[pair.a.id]++; counts[pair.b.id]++;
-  }
+  const used = new Set<string>(); const chosen: { a: Team; b: Team }[] = []; let visits = 0;
+  const edgeKey = (a: Team, b: Team) => [a.id, b.id].sort().join("|");
+  const eligible = (a: Team, b: Team) => a.id !== b.id && a.group === b.group && !used.has(edgeKey(a, b)) && (allowSameClub || a.club.toLowerCase() !== b.club.toLowerCase());
+  const solve = (): boolean => {
+    if (++visits > 350000) return false;
+    const incomplete = teams.filter(team => counts[team.id] < target);
+    if (!incomplete.length) return true;
+    const team = incomplete.sort((a, b) => {
+      const options = (item: Team) => teams.filter(other => counts[other.id] < target && eligible(item, other)).length;
+      return options(a) - options(b) || (target - counts[b.id]) - (target - counts[a.id]);
+    })[0];
+    const candidates = teams.filter(other => counts[other.id] < target && eligible(team, other)).sort((a, b) =>
+      (target - counts[b.id]) - (target - counts[a.id]) || a.club.localeCompare(b.club) || a.name.localeCompare(b.name));
+    for (const opponent of candidates) {
+      const key = edgeKey(team, opponent); used.add(key); counts[team.id]++; counts[opponent.id]++; chosen.push({ a: team, b: opponent });
+      const stillPossible = teams.every(item => {
+        const needed = target - counts[item.id];
+        return needed <= 0 || teams.filter(other => counts[other.id] < target && eligible(item, other)).length >= needed;
+      });
+      if (stillPossible && solve()) return true;
+      chosen.pop(); counts[team.id]--; counts[opponent.id]--; used.delete(key);
+    }
+    return false;
+  };
+  return solve() ? chosen : null;
+}
+
+function buildSchedule(teams: Team[], target: number, pitches: number) {
+  const interClub = chooseBalancedPairs(teams, target, false);
+  const chosen = interClub ?? chooseBalancedPairs(teams, target, true) ?? [];
+  const counts = Object.fromEntries(teams.map(team => [team.id, 0]));
+  chosen.forEach(pair => { counts[pair.a.id]++; counts[pair.b.id]++; });
   const warnings: string[] = [];
   const short = teams.filter(team => counts[team.id] < target);
   if (short.length) warnings.push(`${short.length} team${short.length === 1 ? "" : "s"} could not reach ${target} games with the current inputs.`);
   const sameClub = chosen.filter(pair => pair.a.club.toLowerCase() === pair.b.club.toLowerCase());
   if (sameClub.length) warnings.push(`${sameClub.length} same-club fixture${sameClub.length === 1 ? " was" : "s were"} unavoidable.`);
-  const rounds: { ids: Set<string>; pairs: typeof pool }[] = [];
+  const rounds: { ids: Set<string>; pairs: { a: Team; b: Team }[] }[] = [];
   chosen.forEach(pair => {
     let round = rounds.find(item => item.pairs.length < pitches && !item.ids.has(pair.a.id) && !item.ids.has(pair.b.id));
     if (!round) { round = { ids: new Set(), pairs: [] }; rounds.push(round); }
@@ -46,22 +67,41 @@ function buildSchedule(teams: Team[], target: number, pitches: number) {
   return { warnings, matches: rounds.flatMap((round, roundIndex) => round.pairs.map((pair, pitchIndex) => ({ id: uid(), home: pair.a.id, away: pair.b.id, round: roundIndex + 1, pitch: pitchIndex + 1 }))) };
 }
 
-async function downloadElementAsPng(element: HTMLElement, fileName: string) {
-  const clone = element.cloneNode(true) as HTMLElement;
-  const copyStyles = (source: Element, target: Element) => {
-    const computed = getComputedStyle(source); const targetStyle = (target as HTMLElement).style;
-    for (const property of computed) targetStyle.setProperty(property, computed.getPropertyValue(property), computed.getPropertyPriority(property));
-    Array.from(source.children).forEach((child, index) => copyStyles(child, target.children[index]));
-  };
-  copyStyles(element, clone);
-  const width = element.offsetWidth; const height = element.offsetHeight; clone.style.margin = "0";
-  const serialised = new XMLSerializer().serializeToString(clone);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml">${serialised}</div></foreignObject></svg>`;
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-  const image = new Image(); image.src = url; await image.decode();
-  const canvas = document.createElement("canvas"); canvas.width = width * 2; canvas.height = height * 2;
-  const context = canvas.getContext("2d")!; context.scale(2, 2); context.drawImage(image, 0, 0); URL.revokeObjectURL(url);
-  const link = document.createElement("a"); link.download = fileName; link.href = canvas.toDataURL("image/png", 1); link.click();
+async function exportPosterPng(form: Form, matches: Match[], teams: Record<string, Team>, rounds: number, gameLength: number, end: string, roundTime: (round: number) => string) {
+  const canvas = document.createElement("canvas"); canvas.width = 2240; canvas.height = 1494;
+  const ctx = canvas.getContext("2d")!; ctx.scale(2, 2); const width = 1120; const height = 747;
+  ctx.fillStyle = "#fbfaf6"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#111"; ctx.lineWidth = 3; ctx.strokeRect(2, 2, width - 4, height - 4); ctx.textAlign = "center";
+  if (form.logo.startsWith("data:image/")) {
+    const crest = new Image(); crest.src = form.logo; await crest.decode(); ctx.drawImage(crest, 43, 28, 108, 126); ctx.drawImage(crest, 969, 28, 108, 126);
+  }
+  ctx.fillStyle = "#050505"; ctx.font = "900 56px Arial"; ctx.fillText((form.host || "HOST CLUB").toUpperCase(), 560, 67);
+  ctx.fillStyle = form.primary; ctx.font = "900 50px Arial"; ctx.fillText("GIRLS BLITZ", 560, 117);
+  ctx.fillStyle = form.accent; ctx.beginPath(); ctx.moveTo(290, 126); ctx.lineTo(830, 126); ctx.lineTo(814, 143); ctx.lineTo(830, 160); ctx.lineTo(290, 160); ctx.lineTo(306, 143); ctx.closePath(); ctx.fill();
+  const date = form.date ? new Date(`${form.date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }).toUpperCase() : "EVENT DATE";
+  ctx.fillStyle = "#fff"; ctx.font = "900 20px Arial"; ctx.fillText(date, 560, 151); ctx.fillStyle = "#111"; ctx.font = "900 16px Arial"; ctx.fillText(`HOSTED BY ${(form.host || "HOST CLUB").toUpperCase()}`, 560, 179);
+  ctx.fillStyle = form.primary; ctx.fillRect(10, 184, 1100, 44); ctx.fillStyle = "#fff"; ctx.font = "900 24px Arial"; ctx.fillText(`${form.age || "AGE GROUP"} BLITZ`, 560, 215);
+  ctx.fillStyle = "#fff"; ctx.strokeStyle = "#9bae9f"; ctx.lineWidth = 1; ctx.fillRect(10, 228, 1100, 46); ctx.strokeRect(10, 228, 1100, 46);
+  const facts = [`${form.start} – ${end}`, `${gameLength} MIN GAMES`, `${form.gap} MIN BREAK BETWEEN ROUNDS`, `PITCHES P1–P${form.pitches}`, `${form.games} GAMES PER TEAM`];
+  facts.forEach((fact, index) => { const cell = 1100 / facts.length; if (index) { ctx.beginPath(); ctx.moveTo(10 + index * cell, 228); ctx.lineTo(10 + index * cell, 274); ctx.stroke(); } ctx.fillStyle = "#111"; ctx.font = "800 11px Arial"; ctx.fillText(fact, 10 + index * cell + cell / 2, 256); });
+  const columns = rounds <= 4 ? 2 : 3; const rows = Math.max(1, Math.ceil(rounds / columns)); const gap = 8; const gridTop = 282; const gridHeight = 308; const boxWidth = (1100 - gap * (columns - 1)) / columns; const boxHeight = (gridHeight - gap * (rows - 1)) / rows;
+  Array.from({ length: rounds }, (_, i) => i + 1).forEach((round, index) => {
+    const left = 10 + (index % columns) * (boxWidth + gap); const top = gridTop + Math.floor(index / columns) * (boxHeight + gap);
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#79927d"; ctx.strokeRect(left, top, boxWidth, boxHeight); ctx.fillStyle = "#111"; ctx.font = "900 15px Arial"; ctx.fillText(`ROUND ${round}`, left + boxWidth / 2 - 35, top + 20); ctx.fillStyle = form.primary; ctx.fillText(roundTime(round), left + boxWidth / 2 + 50, top + 20);
+    const cellWidth = boxWidth / form.pitches;
+    Array.from({ length: form.pitches }, (_, i) => i + 1).forEach(pitch => {
+      const x = left + (pitch - 1) * cellWidth; const match = matches.find(item => item.round === round && item.pitch === pitch);
+      ctx.fillStyle = form.primary; ctx.fillRect(x, top + 28, cellWidth, 24); ctx.fillStyle = "#fff"; ctx.font = "800 13px Arial"; ctx.fillText(`P${pitch}`, x + cellWidth / 2, top + 45); ctx.strokeStyle = "#91a594"; ctx.strokeRect(x, top + 28, cellWidth, boxHeight - 28);
+      if (match) { ctx.fillStyle = "#111"; ctx.font = "800 11px Arial"; ctx.fillText(teams[match.home]?.name || "", x + cellWidth / 2, top + 76); ctx.font = "600 9px Arial"; ctx.fillText("vs", x + cellWidth / 2, top + 91); ctx.font = "800 11px Arial"; ctx.fillText(teams[match.away]?.name || "", x + cellWidth / 2, top + 108); }
+    });
+  });
+  ctx.fillStyle = form.primary; ctx.fillRect(10, 598, 1100, 24); ctx.fillStyle = "#fff"; ctx.font = "900 15px Arial"; ctx.fillText("★     CLUB RULES & INFORMATION     ★", 560, 615);
+  ctx.strokeStyle = "#829785"; ctx.strokeRect(10, 622, 1100, 84); ctx.textAlign = "left"; ctx.fillStyle = "#111"; ctx.font = "700 10px Arial";
+  const rules = (form.rules || "Add optional game rules").split("\n").filter(Boolean).slice(0, 4); rules.forEach((rule, index) => ctx.fillText(`•  ${rule}`, 35, 642 + index * 16));
+  ctx.fillText("•  Respect referees at all times", 400, 642); ctx.fillText("•  Encourage rotation throughout matches", 400, 658);
+  const wrap = (text: string, x: number, y: number, maxWidth: number) => { const words = text.split(" "); let line = ""; let lineY = y; words.forEach(word => { const test = line ? `${line} ${word}` : word; if (ctx.measureText(test).width > maxWidth && line) { ctx.fillText(line, x, lineY); line = word; lineY += 14; } else line = test; }); if (line) ctx.fillText(line, x, lineY); };
+  wrap(form.info || "Add optional host club information", 760, 642, 320);
+  ctx.textAlign = "center"; ctx.fillStyle = form.primary; ctx.fillRect(10, 713, 1100, 27); ctx.fillStyle = "#fff"; ctx.font = "900 14px Arial"; ctx.fillText("★     THANK YOU FOR YOUR SUPPORT – ENJOY THE DAY!     ★", 560, 732);
+  const link = document.createElement("a"); link.download = `${(form.age || "blitz").toLowerCase()}-fixtures.png`; link.href = canvas.toDataURL("image/png", 1); link.click();
 }
 
 export default function Home() {
@@ -99,7 +139,7 @@ export default function Home() {
     {step === "setup" && <Setup form={form} set={set} teams={teams} setTeams={setTeams} draft={draft} setDraft={setDraft} addTeam={addTeam} changeTeam={changeTeam} gameLength={gameLength} onContinue={() => setStep("brand")}/>}
     {step === "brand" && <Brand form={form} set={set} onBack={() => setStep("setup")} onContinue={form.mode === "groups" ? generate : () => setStep("schedule")}/>}
     {step === "schedule" && <section className="workspace schedule-v2"><div className="panel board-panel"><div className="board-head"><Head n="03" title="Fine-tune the fixtures" sub="Drag a fixture onto any empty slot. Drop it onto another game to swap them."/><button className="ghost" disabled={teams.length < 2} onClick={() => teams.length > 1 && setMatches(items => [...items, { id: uid(), home: teams[0].id, away: teams[1].id, round: Math.max(roundCount, 1), pitch: 1 }])}>+ Add fixture</button></div>{warnings.map((warning, i) => <div className="warning" key={i}>⚠ <span>{warning}</span></div>)}<div className="schedule-legend"><span><i>⠿</i> Drag fixture</span><span><i>P</i> Pitch</span><span><i>R</i> Round</span></div><div className="schedule-board">{Array.from({ length: Math.max(roundCount, 1) }, (_, i) => i + 1).map(round => <div className="board-round" key={round}><div className="round-label"><small>ROUND</small><b>{round}</b><span>{roundTime(round)}</span></div><div className="slots" style={{ gridTemplateColumns: `repeat(${form.pitches}, minmax(168px, 1fr))` }}>{Array.from({ length: form.pitches }, (_, i) => i + 1).map(pitch => { const match = matches.find(item => item.round === round && item.pitch === pitch); return <div className={`slot ${match ? "filled" : ""}`} key={pitch} onDragOver={e => e.preventDefault()} onDrop={() => moveMatch(round, pitch)}><label>Pitch {pitch}</label>{match ? <div className="fixture-card" draggable onDragStart={() => setDragged(match.id)}><span className="drag-handle">⠿</span><div><select aria-label="First team" value={match.home} onChange={e => changeMatch(match.id, { home: e.target.value })}>{teams.map(team => <option value={team.id} key={team.id}>{team.name}</option>)}</select><i>vs</i><select aria-label="Second team" value={match.away} onChange={e => changeMatch(match.id, { away: e.target.value })}>{teams.map(team => <option value={team.id} key={team.id}>{team.name}</option>)}</select></div><button className="remove" aria-label="Remove fixture" onClick={() => setMatches(items => items.filter(item => item.id !== match.id))}>×</button></div> : <span className="drop-hint">Drop fixture here</span>}</div>})}</div></div>)}</div><div className="actions"><button className="ghost" onClick={() => setStep("brand")}>← Club identity</button><button className="ghost" onClick={() => setStep("setup")}>Edit event & teams</button></div></div>
-      <div className="preview"><div className="previewbar"><div><b>Live poster</b><small>This exact poster—crest, rules and all—is used for the PNG.</small></div><button className="primary" disabled={!matches.length} onClick={() => posterRef.current && downloadElementAsPng(posterRef.current, `${(form.age || "blitz").toLowerCase()}-fixtures.png`)}>Download PNG <span>↓</span></button></div><div className="posterwrap"><Poster posterRef={posterRef} form={form} matches={matches} teams={teamMap} rounds={roundCount} gameLength={gameLength} end={eventEnd} roundTime={roundTime}/></div></div></section>}
+      <div className="preview"><div className="previewbar"><div><b>Live poster</b><small>The PNG uses the same data, colours, crest, rules and fixture layout.</small></div><button className="primary" disabled={!matches.length} onClick={() => exportPosterPng(form, matches, teamMap, roundCount, gameLength, eventEnd, roundTime)}>Download PNG <span>↓</span></button></div><div className="posterwrap"><Poster posterRef={posterRef} form={form} matches={matches} teams={teamMap} rounds={roundCount} gameLength={gameLength} end={eventEnd} roundTime={roundTime}/></div></div></section>}
   </main>;
 }
 
