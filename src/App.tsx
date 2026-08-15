@@ -19,51 +19,56 @@ const initial: Form = {
   rules: "Maximum 9-a-side\nGames played straight through\nPlease respect referees at all times", info: "", primary: "#064b1f", accent: "#c9151e", logo: "",
 };
 
-function chooseBalancedPairs(teams: Team[], target: number, allowSameClub: boolean) {
-  const counts = Object.fromEntries(teams.map(team => [team.id, 0]));
-  const used = new Set<string>(); const chosen: { a: Team; b: Team }[] = []; let visits = 0;
+function solvePackedRounds(teams: Team[], target: number, pitches: number, roundLimit: number, allowSameClub: boolean) {
+  const counts = Object.fromEntries(teams.map(team => [team.id, 0])); const usedEdges = new Set<string>();
+  const rounds = Array.from({ length: roundLimit }, () => ({ ids: new Set<string>(), pairs: [] as { a: Team; b: Team }[] })); let visits = 0;
   const edgeKey = (a: Team, b: Team) => [a.id, b.id].sort().join("|");
-  const eligible = (a: Team, b: Team) => a.id !== b.id && a.group === b.group && !used.has(edgeKey(a, b)) && (allowSameClub || a.club.toLowerCase() !== b.club.toLowerCase());
-  const solve = (): boolean => {
-    if (++visits > 350000) return false;
-    const incomplete = teams.filter(team => counts[team.id] < target);
-    if (!incomplete.length) return true;
-    const team = incomplete.sort((a, b) => {
-      const options = (item: Team) => teams.filter(other => counts[other.id] < target && eligible(item, other)).length;
-      return options(a) - options(b) || (target - counts[b.id]) - (target - counts[a.id]);
+  const eligible = (a: Team, b: Team, round: number) => a.id !== b.id && a.group === b.group && !rounds[round].ids.has(a.id) && !rounds[round].ids.has(b.id) && !usedEdges.has(edgeKey(a, b)) && counts[a.id] < target && counts[b.id] < target && (allowSameClub || a.club.toLowerCase() !== b.club.toLowerCase());
+  const solve = (round: number): boolean => {
+    if (++visits > 800000) return false;
+    if (round === roundLimit) return teams.every(team => counts[team.id] === target);
+    const current = rounds[round]; const remainingGames = teams.reduce((sum, team) => sum + target - counts[team.id], 0) / 2;
+    if (remainingGames > (roundLimit - round - 1) * pitches + (pitches - current.pairs.length)) return false;
+    if (teams.some(team => target - counts[team.id] > roundLimit - round - (current.ids.has(team.id) ? 1 : 0))) return false;
+    if (current.pairs.length === pitches) return solve(round + 1);
+    const available = teams.filter(team => counts[team.id] < target && !current.ids.has(team.id));
+    if (!available.length) return solve(round + 1);
+    const team = available.sort((a, b) => {
+      const options = (item: Team) => teams.filter(other => eligible(item, other, round)).length;
+      const urgency = (item: Team) => target - counts[item.id] === roundLimit - round ? 0 : 1;
+      return urgency(a) - urgency(b) || options(a) - options(b) || (target - counts[b.id]) - (target - counts[a.id]);
     })[0];
-    const candidates = teams.filter(other => counts[other.id] < target && eligible(team, other)).sort((a, b) =>
+    const opponents = teams.filter(other => eligible(team, other, round)).sort((a, b) =>
       (target - counts[b.id]) - (target - counts[a.id]) || a.club.localeCompare(b.club) || a.name.localeCompare(b.name));
-    for (const opponent of candidates) {
-      const key = edgeKey(team, opponent); used.add(key); counts[team.id]++; counts[opponent.id]++; chosen.push({ a: team, b: opponent });
-      const stillPossible = teams.every(item => {
-        const needed = target - counts[item.id];
-        return needed <= 0 || teams.filter(other => counts[other.id] < target && eligible(item, other)).length >= needed;
-      });
-      if (stillPossible && solve()) return true;
-      chosen.pop(); counts[team.id]--; counts[opponent.id]--; used.delete(key);
+    for (const opponent of opponents) {
+      const key = edgeKey(team, opponent); current.pairs.push({ a: team, b: opponent }); current.ids.add(team.id); current.ids.add(opponent.id); usedEdges.add(key); counts[team.id]++; counts[opponent.id]++;
+      const globallyPossible = teams.every(item => target - counts[item.id] <= teams.filter(other => item.id !== other.id && item.group === other.group && !usedEdges.has(edgeKey(item, other)) && counts[other.id] < target && (allowSameClub || item.club.toLowerCase() !== other.club.toLowerCase())).length);
+      if (globallyPossible && solve(round)) return true;
+      counts[team.id]--; counts[opponent.id]--; usedEdges.delete(key); current.ids.delete(team.id); current.ids.delete(opponent.id); current.pairs.pop();
     }
+    const futureCapacity = (roundLimit - round - 1) * pitches;
+    if (remainingGames <= futureCapacity && current.pairs.length > 0 && solve(round + 1)) return true;
     return false;
   };
-  return solve() ? chosen : null;
+  return solve(0) ? rounds : null;
 }
 
 function buildSchedule(teams: Team[], target: number, pitches: number) {
-  const interClub = chooseBalancedPairs(teams, target, false);
-  const chosen = interClub ?? chooseBalancedPairs(teams, target, true) ?? [];
-  const counts = Object.fromEntries(teams.map(team => [team.id, 0]));
-  chosen.forEach(pair => { counts[pair.a.id]++; counts[pair.b.id]++; });
-  const warnings: string[] = [];
+  const totalGames = teams.length * target / 2; const minimumRounds = Math.max(target, Math.ceil(totalGames / pitches)); const maximumRounds = minimumRounds + teams.length;
+  const findSchedule = (allowSameClub: boolean) => {
+    for (let roundCount = minimumRounds; roundCount <= maximumRounds; roundCount++) {
+      const result = solvePackedRounds(teams, target, pitches, roundCount, allowSameClub);
+      if (result) return result;
+    }
+    return null;
+  };
+  const interClub = findSchedule(false); const rounds = interClub ?? findSchedule(true) ?? [];
+  const chosen = rounds.flatMap(round => round.pairs); const warnings: string[] = [];
+  const counts = Object.fromEntries(teams.map(team => [team.id, chosen.filter(pair => pair.a.id === team.id || pair.b.id === team.id).length]));
   const short = teams.filter(team => counts[team.id] < target);
   if (short.length) warnings.push(`${short.length} team${short.length === 1 ? "" : "s"} could not reach ${target} games with the current inputs.`);
   const sameClub = chosen.filter(pair => pair.a.club.toLowerCase() === pair.b.club.toLowerCase());
   if (sameClub.length) warnings.push(`${sameClub.length} same-club fixture${sameClub.length === 1 ? " was" : "s were"} unavoidable.`);
-  const rounds: { ids: Set<string>; pairs: { a: Team; b: Team }[] }[] = [];
-  chosen.forEach(pair => {
-    let round = rounds.find(item => item.pairs.length < pitches && !item.ids.has(pair.a.id) && !item.ids.has(pair.b.id));
-    if (!round) { round = { ids: new Set(), pairs: [] }; rounds.push(round); }
-    round.pairs.push(pair); round.ids.add(pair.a.id); round.ids.add(pair.b.id);
-  });
   return { warnings, matches: rounds.flatMap((round, roundIndex) => round.pairs.map((pair, pitchIndex) => ({ id: uid(), home: pair.a.id, away: pair.b.id, round: roundIndex + 1, pitch: pitchIndex + 1 }))) };
 }
 
