@@ -75,37 +75,48 @@ function buildSchedule(teams: Team[], target: number, pitches: number) {
 async function renderPosterCanvas(form: Form, matches: Match[], teams: Record<string, Team>, rounds: number, gameLength: number, end: string, roundTime: (round: number) => string) {
   const canvas = document.createElement("canvas"); canvas.width = 2240; canvas.height = 1494;
   const ctx = canvas.getContext("2d")!; ctx.scale(2, 2); const width = 1120; const height = 747;
-  ctx.fillStyle = "#fbfaf6"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#111"; ctx.lineWidth = 3; ctx.strokeRect(2, 2, width - 4, height - 4); ctx.textAlign = "center";
+  const rounded = (x: number, y: number, w: number, h: number, radius: number, fill: string, stroke?: string) => {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, radius); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+  };
+  const fitted = (text: string, x: number, y: number, maxWidth: number, size = 13, weight = 800) => {
+    let fontSize = size; do { ctx.font = `${weight} ${fontSize}px "Arial Narrow", "Trebuchet MS", Arial`; fontSize--; } while (ctx.measureText(text).width > maxWidth && fontSize > 8); ctx.fillText(text, x, y);
+  };
+  ctx.fillStyle = "#fdfcf9"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#111"; ctx.lineWidth = 2; ctx.strokeRect(2, 2, width - 4, height - 4); ctx.textAlign = "center";
   if (form.logo.startsWith("data:image/")) {
     const crest = new Image(); crest.src = form.logo; await crest.decode(); ctx.drawImage(crest, 43, 28, 108, 126); ctx.drawImage(crest, 969, 28, 108, 126);
   }
-  ctx.fillStyle = "#050505"; ctx.font = "900 56px Arial"; ctx.fillText((form.host || "HOST CLUB").toUpperCase(), 560, 67);
-  ctx.fillStyle = form.primary; ctx.font = "900 50px Arial"; ctx.fillText("GIRLS BLITZ", 560, 117);
+  ctx.fillStyle = "#050505"; ctx.font = '900 58px "Arial Black", "Arial Narrow", Arial'; ctx.fillText((form.host || "HOST CLUB").toUpperCase(), 560, 68);
+  ctx.fillStyle = form.primary; ctx.font = '900 52px "Arial Black", "Arial Narrow", Arial'; ctx.fillText("GIRLS BLITZ", 560, 119);
   ctx.fillStyle = form.accent; ctx.beginPath(); ctx.moveTo(290, 126); ctx.lineTo(830, 126); ctx.lineTo(814, 143); ctx.lineTo(830, 160); ctx.lineTo(290, 160); ctx.lineTo(306, 143); ctx.closePath(); ctx.fill();
   const date = form.date ? new Date(`${form.date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }).toUpperCase() : "EVENT DATE";
-  ctx.fillStyle = "#fff"; ctx.font = "900 20px Arial"; ctx.fillText(date, 560, 151); ctx.fillStyle = "#111"; ctx.font = "900 16px Arial"; ctx.fillText(`HOSTED BY ${(form.host || "HOST CLUB").toUpperCase()}`, 560, 179);
-  ctx.fillStyle = form.primary; ctx.fillRect(10, 184, 1100, 44); ctx.fillStyle = "#fff"; ctx.font = "900 24px Arial"; ctx.fillText(`${form.age || "AGE GROUP"} BLITZ`, 560, 215);
-  ctx.fillStyle = "#fff"; ctx.strokeStyle = "#9bae9f"; ctx.lineWidth = 1; ctx.fillRect(10, 228, 1100, 46); ctx.strokeRect(10, 228, 1100, 46);
-  const facts = [`${form.start} – ${end}`, `${gameLength} MIN GAMES`, `${form.gap} MIN BREAK BETWEEN ROUNDS`, `PITCHES P1–P${form.pitches}`, `${form.games} GAMES PER TEAM`];
-  facts.forEach((fact, index) => { const cell = 1100 / facts.length; if (index) { ctx.beginPath(); ctx.moveTo(10 + index * cell, 228); ctx.lineTo(10 + index * cell, 274); ctx.stroke(); } ctx.fillStyle = "#111"; ctx.font = "800 11px Arial"; ctx.fillText(fact, 10 + index * cell + cell / 2, 256); });
-  const columns = rounds <= 4 ? 2 : 3; const rows = Math.max(1, Math.ceil(rounds / columns)); const gap = 8; const gridTop = 282; const gridHeight = 308; const boxWidth = (1100 - gap * (columns - 1)) / columns; const boxHeight = (gridHeight - gap * (rows - 1)) / rows;
+  ctx.fillStyle = "#fff"; ctx.font = '900 20px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(date, 560, 151); ctx.fillStyle = "#111"; ctx.font = '900 16px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(`HOSTED BY ${(form.host || "HOST CLUB").toUpperCase()}`, 560, 179);
+  rounded(10, 184, 1100, 44, 7, form.primary); ctx.fillStyle = "#fff"; ctx.font = '900 25px "Arial Black", "Arial Narrow", Arial'; ctx.fillText(`${form.age || "AGE GROUP"} BLITZ`, 560, 215);
+  rounded(10, 232, 1100, 43, 7, "#fff", "#9bae9f");
+  const facts = [{ icon: "◷", text: `${form.start} – ${end}` }, { icon: "◉", text: `${gameLength} MIN GAMES` }, { icon: "⏱", text: `${form.gap} MIN BREAK BETWEEN ROUNDS` }, { icon: "▦", text: `PITCHES P1–P${form.pitches}` }, { icon: "✓", text: `${form.games} GAMES PER TEAM` }];
+  facts.forEach((fact, index) => { const cell = 1100 / facts.length; if (index) { ctx.strokeStyle = "#b3c0b5"; ctx.beginPath(); ctx.moveTo(10 + index * cell, 238); ctx.lineTo(10 + index * cell, 269); ctx.stroke(); } const centre = 10 + index * cell + cell / 2; ctx.fillStyle = form.primary; ctx.font = '900 17px "Trebuchet MS", Arial'; ctx.fillText(fact.icon, centre - 66, 259); ctx.fillStyle = "#111"; ctx.font = '800 11px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(fact.text, centre + 10, 258); });
+  const columns = rounds <= 4 ? 2 : 3; const rows = Math.max(1, Math.ceil(rounds / columns)); const gap = 9; const gridTop = 283; const gridHeight = 306; const boxWidth = (1100 - gap * (columns - 1)) / columns; const boxHeight = (gridHeight - gap * (rows - 1)) / rows;
   Array.from({ length: rounds }, (_, i) => i + 1).forEach((round, index) => {
     const left = 10 + (index % columns) * (boxWidth + gap); const top = gridTop + Math.floor(index / columns) * (boxHeight + gap);
-    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#79927d"; ctx.strokeRect(left, top, boxWidth, boxHeight); ctx.fillStyle = "#111"; ctx.font = "900 15px Arial"; ctx.fillText(`ROUND ${round}`, left + boxWidth / 2 - 35, top + 20); ctx.fillStyle = form.primary; ctx.fillText(roundTime(round), left + boxWidth / 2 + 50, top + 20);
+    rounded(left, top, boxWidth, boxHeight, 7, "#fff", "#79927d");
+    const roundLabel = `ROUND ${round}`; const timeLabel = roundTime(round); ctx.font = '900 16px "Arial Narrow", "Trebuchet MS", Arial';
+    const headingGap = 9; const headingWidth = ctx.measureText(roundLabel).width + headingGap + ctx.measureText(timeLabel).width; const headingStart = left + (boxWidth - headingWidth) / 2;
+    ctx.textAlign = "left"; ctx.fillStyle = "#111"; ctx.fillText(roundLabel, headingStart, top + 21); ctx.fillStyle = form.primary; ctx.fillText(timeLabel, headingStart + ctx.measureText(roundLabel).width + headingGap, top + 21); ctx.textAlign = "center";
     const cellWidth = boxWidth / form.pitches;
     Array.from({ length: form.pitches }, (_, i) => i + 1).forEach(pitch => {
       const x = left + (pitch - 1) * cellWidth; const match = matches.find(item => item.round === round && item.pitch === pitch);
-      ctx.fillStyle = form.primary; ctx.fillRect(x, top + 28, cellWidth, 24); ctx.fillStyle = "#fff"; ctx.font = "800 13px Arial"; ctx.fillText(`P${pitch}`, x + cellWidth / 2, top + 45); ctx.strokeStyle = "#91a594"; ctx.strokeRect(x, top + 28, cellWidth, boxHeight - 28);
-      if (match) { ctx.fillStyle = "#111"; ctx.font = "800 11px Arial"; ctx.fillText(teams[match.home]?.name || "", x + cellWidth / 2, top + 76); ctx.font = "600 9px Arial"; ctx.fillText("vs", x + cellWidth / 2, top + 91); ctx.font = "800 11px Arial"; ctx.fillText(teams[match.away]?.name || "", x + cellWidth / 2, top + 108); }
+      rounded(x + 2, top + 29, cellWidth - 4, 24, 4, form.primary); ctx.fillStyle = "#fff"; ctx.font = '900 13px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText(`P${pitch}`, x + cellWidth / 2, top + 46);
+      if (pitch > 1) { ctx.strokeStyle = "#c0cbc2"; ctx.beginPath(); ctx.moveTo(x, top + 56); ctx.lineTo(x, top + boxHeight - 6); ctx.stroke(); }
+      if (match) { const centre = x + cellWidth / 2; const bodyMid = top + 54 + (boxHeight - 54) / 2; ctx.fillStyle = "#111"; fitted(teams[match.home]?.name || "", centre, bodyMid - 15, cellWidth - 14, 13); ctx.font = '700 9px "Trebuchet MS", Arial'; ctx.fillStyle = "#546058"; ctx.fillText("VS", centre, bodyMid); ctx.fillStyle = "#111"; fitted(teams[match.away]?.name || "", centre, bodyMid + 17, cellWidth - 14, 13); }
     });
   });
-  ctx.fillStyle = form.primary; ctx.fillRect(10, 598, 1100, 24); ctx.fillStyle = "#fff"; ctx.font = "900 15px Arial"; ctx.fillText("★     CLUB RULES & INFORMATION     ★", 560, 615);
-  ctx.strokeStyle = "#829785"; ctx.strokeRect(10, 622, 1100, 84); ctx.textAlign = "left"; ctx.fillStyle = "#111"; ctx.font = "700 10px Arial";
-  const rules = (form.rules || "Add optional game rules").split("\n").filter(Boolean).slice(0, 4); rules.forEach((rule, index) => ctx.fillText(`•  ${rule}`, 35, 642 + index * 16));
-  ctx.fillText("•  Respect referees at all times", 400, 642); ctx.fillText("•  Encourage rotation throughout matches", 400, 658);
+  rounded(10, 598, 1100, 26, 7, form.primary); ctx.fillStyle = "#fff"; ctx.font = '900 16px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText("★     CLUB RULES & INFORMATION     ★", 560, 616);
+  rounded(10, 627, 1100, 79, 7, "#fff", "#829785"); ctx.strokeStyle = "#a9b7ab"; [373, 742].forEach(x => { ctx.beginPath(); ctx.moveTo(x, 636); ctx.lineTo(x, 697); ctx.stroke(); });
+  ctx.textAlign = "left"; ctx.fillStyle = "#111"; ctx.font = '700 10.5px "Trebuchet MS", Arial';
+  const rules = (form.rules || "Add optional game rules").split("\n").filter(Boolean).slice(0, 4); rules.forEach((rule, index) => { ctx.fillStyle = form.primary; ctx.font = '900 12px "Trebuchet MS", Arial'; ctx.fillText(index === 1 ? "◷" : index === 2 ? "✓" : "●", 27, 648 + index * 15); ctx.fillStyle = "#111"; ctx.font = '700 10.5px "Trebuchet MS", Arial'; ctx.fillText(rule, 47, 648 + index * 15); });
+  ctx.fillStyle = form.primary; ctx.font = '900 12px "Trebuchet MS", Arial'; ctx.fillText("●", 390, 648); ctx.fillText("↻", 390, 665); ctx.fillStyle = "#111"; ctx.font = '700 10.5px "Trebuchet MS", Arial'; ctx.fillText("Respect referees at all times", 410, 648); ctx.fillText("Encourage rotation throughout matches", 410, 665);
   const wrap = (text: string, x: number, y: number, maxWidth: number) => { const words = text.split(" "); let line = ""; let lineY = y; words.forEach(word => { const test = line ? `${line} ${word}` : word; if (ctx.measureText(test).width > maxWidth && line) { ctx.fillText(line, x, lineY); line = word; lineY += 14; } else line = test; }); if (line) ctx.fillText(line, x, lineY); };
-  wrap(form.info || "Add optional host club information", 760, 642, 320);
-  ctx.textAlign = "center"; ctx.fillStyle = form.primary; ctx.fillRect(10, 713, 1100, 27); ctx.fillStyle = "#fff"; ctx.font = "900 14px Arial"; ctx.fillText("★     THANK YOU FOR YOUR SUPPORT – ENJOY THE DAY!     ★", 560, 732);
+  ctx.fillStyle = form.primary; ctx.font = '900 17px "Trebuchet MS", Arial'; ctx.fillText("▣", 762, 650); ctx.fillStyle = "#111"; ctx.font = '700 10.5px "Trebuchet MS", Arial'; wrap(form.info || "Add optional host club information", 790, 648, 290);
+  ctx.textAlign = "center"; rounded(10, 713, 1100, 27, 6, form.primary); ctx.fillStyle = "#fff"; ctx.font = '900 14px "Arial Narrow", "Trebuchet MS", Arial'; ctx.fillText("★     THANK YOU FOR YOUR SUPPORT – ENJOY THE DAY!     ★", 560, 732);
   return canvas;
 }
 
