@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Team = { id: string; name: string; club: string; group: string };
 type Match = { id: string; home: string; away: string; round: number; pitch: number };
@@ -67,7 +67,7 @@ function buildSchedule(teams: Team[], target: number, pitches: number) {
   return { warnings, matches: rounds.flatMap((round, roundIndex) => round.pairs.map((pair, pitchIndex) => ({ id: uid(), home: pair.a.id, away: pair.b.id, round: roundIndex + 1, pitch: pitchIndex + 1 }))) };
 }
 
-async function exportPosterPng(form: Form, matches: Match[], teams: Record<string, Team>, rounds: number, gameLength: number, end: string, roundTime: (round: number) => string) {
+async function renderPosterCanvas(form: Form, matches: Match[], teams: Record<string, Team>, rounds: number, gameLength: number, end: string, roundTime: (round: number) => string) {
   const canvas = document.createElement("canvas"); canvas.width = 2240; canvas.height = 1494;
   const ctx = canvas.getContext("2d")!; ctx.scale(2, 2); const width = 1120; const height = 747;
   ctx.fillStyle = "#fbfaf6"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#111"; ctx.lineWidth = 3; ctx.strokeRect(2, 2, width - 4, height - 4); ctx.textAlign = "center";
@@ -101,6 +101,11 @@ async function exportPosterPng(form: Form, matches: Match[], teams: Record<strin
   const wrap = (text: string, x: number, y: number, maxWidth: number) => { const words = text.split(" "); let line = ""; let lineY = y; words.forEach(word => { const test = line ? `${line} ${word}` : word; if (ctx.measureText(test).width > maxWidth && line) { ctx.fillText(line, x, lineY); line = word; lineY += 14; } else line = test; }); if (line) ctx.fillText(line, x, lineY); };
   wrap(form.info || "Add optional host club information", 760, 642, 320);
   ctx.textAlign = "center"; ctx.fillStyle = form.primary; ctx.fillRect(10, 713, 1100, 27); ctx.fillStyle = "#fff"; ctx.font = "900 14px Arial"; ctx.fillText("★     THANK YOU FOR YOUR SUPPORT – ENJOY THE DAY!     ★", 560, 732);
+  return canvas;
+}
+
+async function exportPosterPng(form: Form, matches: Match[], teams: Record<string, Team>, rounds: number, gameLength: number, end: string, roundTime: (round: number) => string) {
+  const canvas = await renderPosterCanvas(form, matches, teams, rounds, gameLength, end, roundTime);
   const link = document.createElement("a"); link.download = `${(form.age || "blitz").toLowerCase()}-fixtures.png`; link.href = canvas.toDataURL("image/png", 1); link.click();
 }
 
@@ -113,7 +118,7 @@ export default function Home() {
   const [matches, setMatches] = useState<Match[]>(restored?.matches ?? []);
   const [warnings, setWarnings] = useState<string[]>(restored?.warnings ?? []);
   const [step, setStep] = useState<"setup" | "draft" | "brand" | "poster">("setup");
-  const [draft, setDraft] = useState(""); const posterRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState("");
   useEffect(() => { sessionStorage.setItem("bfm-v2", JSON.stringify({ form, teams, matches, warnings })); }, [form, teams, matches, warnings]);
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm(previous => ({ ...previous, [key]: value }));
   const gameLength = form.timing === "straight" ? form.duration : form.perHalf * 2 + form.halfTime;
@@ -141,7 +146,7 @@ export default function Home() {
     {step === "setup" && <Setup form={form} set={set} teams={teams} setTeams={setTeams} draft={draft} setDraft={setDraft} addTeam={addTeam} changeTeam={changeTeam} gameLength={gameLength} onContinue={generate}/>}
     {step === "draft" && <FixtureDraft form={form} teams={teams} matches={matches} warnings={warnings} roundCount={roundCount} roundTime={roundTime} changeMatch={changeMatch} setMatches={setMatches} regenerate={generate} onBack={() => setStep("setup")} onContinue={() => setStep("brand")}/>}
     {step === "brand" && <Brand form={form} set={set} onBack={() => setStep("draft")} onContinue={() => setStep("poster")}/>}
-    {step === "poster" && <section className="workspace poster-step"><div className="poster-step-head"><Head n="04" title="Preview & export" sub="Review the finished poster, then download a high-resolution PNG for sharing or printing."/><div className="poster-actions"><button className="ghost" onClick={() => setStep("brand")}>← Poster details</button><button className="primary" onClick={() => exportPosterPng(form, matches, teamMap, roundCount, gameLength, eventEnd, roundTime)}>Download PNG <span>↓</span></button></div></div><div className="posterwrap final-preview"><Poster posterRef={posterRef} form={form} matches={matches} teams={teamMap} rounds={roundCount} gameLength={gameLength} end={eventEnd} roundTime={roundTime}/></div><div className="poster-footnote"><span>Need to change a game?</span><button className="text-button" onClick={() => setStep("draft")}>Return to fixture draft</button></div></section>}
+    {step === "poster" && <section className="workspace poster-step"><div className="poster-step-head"><Head n="04" title="Preview & export" sub="Review the finished poster, then download a high-resolution PNG for sharing or printing."/><div className="poster-actions"><button className="ghost" onClick={() => setStep("brand")}>← Poster details</button><button className="primary" onClick={() => exportPosterPng(form, matches, teamMap, roundCount, gameLength, eventEnd, roundTime)}>Download PNG <span>↓</span></button></div></div><div className="posterwrap final-preview"><PosterImage form={form} matches={matches} teams={teamMap} rounds={roundCount} gameLength={gameLength} end={eventEnd} roundTime={roundTime}/></div><div className="poster-footnote"><span>Need to change a game?</span><button className="text-button" onClick={() => setStep("draft")}>Return to fixture draft</button></div></section>}
   </main>;
 }
 
@@ -169,12 +174,17 @@ function Brand({ form, set, onBack, onContinue }: { form: Form; set: <K extends 
   return <section className="workspace brand-grid"><div className="panel brand"><Head n="03" title="Club identity" sub="Use your crest and colours to make the poster recognisably yours."/><label className={`upload ${form.logo ? "has-logo" : ""}`}>{form.logo ? <><img src={form.logo} alt="Club crest"/><b>Change club crest</b></> : <><div>⬆</div><b>Upload club crest</b></>}<input type="file" accept="image/png,image/jpeg" onChange={e => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = () => set("logo", String(reader.result)); reader.readAsDataURL(file); } }}/><small>PNG or JPEG · used on screen and in the download</small></label><div className="colors"><Field label="Primary colour"><input type="color" value={form.primary} onChange={e => set("primary", e.target.value)}/></Field><Field label="Accent colour"><input type="color" value={form.accent} onChange={e => set("accent", e.target.value)}/></Field></div><div className="brand-preview"><i style={{ background: form.primary }}/><i style={{ background: form.accent }}/><span>Your poster palette</span></div></div><div className="panel info-panel"><Head n="✦" title="Rules & host information" sub="Optional notes shown in the information band at the foot of the poster."/><Field label="Game rules"><textarea rows={8} placeholder="One rule per line" value={form.rules} onChange={e => set("rules", e.target.value)}/></Field><Field label="Host information"><textarea rows={6} placeholder="Refreshments, parking, meeting point or other useful information" value={form.info} onChange={e => set("info", e.target.value)}/></Field><div className="actions"><button className="ghost" onClick={onBack}>← Back</button><button className="primary" onClick={onContinue}>Preview poster <span>→</span></button></div></div></section>;
 }
 
-function Poster({ posterRef, form, matches, teams, rounds, gameLength, end, roundTime }: { posterRef: React.RefObject<HTMLDivElement | null>; form: Form; matches: Match[]; teams: Record<string, Team>; rounds: number; gameLength: number; end: string; roundTime: (r: number) => string }) {
-  const date = form.date ? new Date(`${form.date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }).toUpperCase() : "EVENT DATE";
-  const ruleLines = (form.rules || "Add optional game rules").split("\n").filter(Boolean);
-  return <div ref={posterRef} className="poster" style={{ "--club": form.primary, "--accent": form.accent } as React.CSSProperties}><header className="posterhead"><Crest logo={form.logo}/><div className="poster-title"><h2>{(form.host || "HOST CLUB").toUpperCase()}</h2><h3>GIRLS BLITZ</h3><p><span>{date}</span></p><small>HOSTED BY {form.host ? form.host.toUpperCase() : "HOST CLUB"}</small></div><Crest logo={form.logo}/></header><div className="age">{form.age || "AGE GROUP"} BLITZ</div><div className="facts"><span><i>◷</i><b>{form.start} – {end}</b></span><span><i>◉</i><b>{gameLength} MIN GAMES</b></span><span><i>⏱</i><b>{form.gap} MIN BREAK BETWEEN ROUNDS</b></span><span><i>▦</i><b>PITCHES P1–P{form.pitches}</b></span><span><i>✓</i><b>{form.games} GAMES PER TEAM</b></span></div><div className={`rounds r${rounds}`}>{Array.from({ length: rounds }, (_, i) => i + 1).map(round => <article key={round}><h4>ROUND {round} <em>{roundTime(round)}</em></h4><div style={{ gridTemplateColumns: `repeat(${form.pitches}, 1fr)` }}>{Array.from({ length: form.pitches }, (_, i) => i + 1).map(pitch => { const match = matches.find(item => item.round === round && item.pitch === pitch); return <section key={pitch}><b>P{pitch}</b>{match ? <p><span>{teams[match.home]?.name}</span><i>vs</i><span>{teams[match.away]?.name}</span></p> : <p className="bye">—</p>}</section>})}</div></article>)}</div><div className="rules"><b><span>★</span> CLUB RULES & INFORMATION <span>★</span></b><div><section>{ruleLines.slice(0, 3).map((rule, i) => <p key={i}><i>{i === 0 ? "●" : i === 1 ? "◷" : "✓"}</i>{rule}</p>)}</section><section><p><i>●</i>Respect referees at all times</p><p><i>↻</i>Encourage rotation throughout matches</p></section><section className="host-info"><i>◧</i><p>{form.info || "Add optional host club information"}</p></section></div></div><footer><span>★</span> THANK YOU FOR YOUR SUPPORT – ENJOY THE DAY! <span>★</span></footer></div>;
+function PosterImage({ form, matches, teams, rounds, gameLength, end, roundTime }: { form: Form; matches: Match[]; teams: Record<string, Team>; rounds: number; gameLength: number; end: string; roundTime: (round: number) => string }) {
+  const [source, setSource] = useState("");
+  useEffect(() => {
+    let active = true;
+    renderPosterCanvas(form, matches, teams, rounds, gameLength, end, roundTime).then(canvas => {
+      if (active) setSource(canvas.toDataURL("image/png", 1));
+    });
+    return () => { active = false; };
+  }, [form, matches, teams, rounds, gameLength, end, roundTime]);
+  return source ? <img className="poster-image" src={source} alt="Final fixtures poster preview"/> : <div className="poster-loading">Preparing poster preview…</div>;
 }
-function Crest({ logo }: { logo: string }) { return <div className={`crest ${logo ? "with-image" : ""}`}>{logo ? <img src={logo} alt=""/> : <><b>CLUB</b><span>CREST</span></>}</div>; }
 function Head({ n, title, sub }: { n: string; title: string; sub: string }) { return <div className="head"><i>{n}</i><div><h2>{title}</h2><p>{sub}</p></div></div>; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function Choice({ label, children }: { label: string; children: React.ReactNode }) { return <div className="choice"><span>{label}</span><div className="seg">{children}</div></div>; }
